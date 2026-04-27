@@ -1,0 +1,4 @@
+name = "netcheck-bff"
+main = "src/index.ts"
+compatibility_date = "2026-04-27"
+compatibility_flags = ["nodejs_compat"]
