@@ -2,6 +2,17 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 
 // ---------------------------------------------------------------------------
+// Allowed origins for strict CORS pinning
+// Prevents third parties from using this Worker as a free proxy.
+// ---------------------------------------------------------------------------
+
+const ALLOWED_ORIGINS = [
+  "https://aym3nb.github.io", // production (GitHub Pages)
+  "http://localhost:5173",    // Vite dev server
+  "http://localhost:4173",    // Vite preview server
+];
+
+// ---------------------------------------------------------------------------
 // TypeScript interfaces for all API response shapes
 // ---------------------------------------------------------------------------
 
@@ -21,15 +32,27 @@ export interface UpstreamErrorResponse {
   timestamp: string;
 }
 
-/** Geolocation and network metadata derived from the Cloudflare cf object */
+/**
+ * Geolocation and network metadata derived from the Cloudflare cf object.
+ *
+ * Keys prefixed with a comment are intentionally compatible with the
+ * frontend's IpInfo interface (previously sourced from ipapi.co) so the UI
+ * rows work without changes.
+ */
 export interface IpInfoResponse {
+  // ipapi.co-compatible keys consumed by the NetCheck frontend
   ip: string | null;
+  isp: string | null;          // cf.asOrganization
+  org: string | null;          // cf.asOrganization (same value)
   city: string | null;
-  country: string | null;
-  continent: string | null;
+  region: string | null;       // cf.region
+  country_name: string | null; // cf.country (ISO-3166 alpha-2 code)
   latitude: number | null;
   longitude: number | null;
   timezone: string | null;
+  // Extended BFF-only fields
+  country: string | null;      // ISO-3166 alpha-2 (same as country_name)
+  continent: string | null;
   asn: number | null;
   asOrganization: string | null;
   timestamp: string;
@@ -42,18 +65,33 @@ export interface IpInfoResponse {
 const app = new Hono();
 
 /**
- * Global CORS middleware – allows the NetCheck frontend (and any origin during
- * development) to call this Worker from a browser without CORS errors.
+ * Global CORS middleware – strictly allows only the NetCheck frontend origins.
+ * Unknown origins receive the production domain as the Allow-Origin value,
+ * which causes browsers to reject the preflight and block the request.
  */
 app.use(
   "/*",
   cors({
-    origin: "*",
+    origin: (origin) =>
+      ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
     allowMethods: ["GET", "OPTIONS"],
     allowHeaders: ["Content-Type", "Accept"],
     maxAge: 86400,
   })
 );
+
+/**
+ * X-NetCheck-Edge middleware – stamps the Cloudflare PoP (Point of Presence)
+ * IATA code on every response so the frontend can display which edge node
+ * served the request (e.g. "CDG" for Paris, "LHR" for London).
+ */
+app.use("/*", async (c, next) => {
+  await next();
+  const cf = c.req.raw.cf as IncomingRequestCfProperties | undefined;
+  if (cf?.colo) {
+    c.header("X-NetCheck-Edge", cf.colo);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // GET /nextdns
@@ -88,7 +126,7 @@ app.get("/nextdns", async (c) => {
     const body: UpstreamErrorResponse = {
       error: isTimeout ? "upstream_timeout" : "upstream_fetch_error",
       message: isTimeout
-        ? "The request to test.nextdns.io timed out after 10 s"
+        ? "The request to test.nextdns.io timed out after 10 seconds"
         : err instanceof Error
           ? err.message
           : "An unknown error occurred while contacting NextDNS",
@@ -115,16 +153,28 @@ app.get("/ip-info", (c) => {
     c.req.header("X-Real-IP") ??
     null;
 
+  const asOrganization = cf?.asOrganization ?? null;
+  const country = cf?.country ?? null;
+  const latitude = cf?.latitude != null ? Number(cf.latitude) : null;
+  const longitude = cf?.longitude != null ? Number(cf.longitude) : null;
+
   const body: IpInfoResponse = {
+    // ipapi.co-compatible fields (consumed by the NetCheck frontend)
     ip,
+    isp: asOrganization,
+    org: asOrganization,
     city: cf?.city ?? null,
-    country: cf?.country ?? null,
-    continent: cf?.continent ?? null,
-    latitude: cf?.latitude != null ? Number(cf.latitude) : null,
-    longitude: cf?.longitude != null ? Number(cf.longitude) : null,
+    region: cf?.region ?? null,
+    country_name: country,   // NOTE: CF provides ISO-3166 alpha-2 codes (e.g. "FR"), not full names.
+                             // ipapi.co returns "France"; the frontend will display the code instead.
+    latitude,
+    longitude,
     timezone: cf?.timezone ?? null,
+    // Extended BFF-only fields
+    country,
+    continent: cf?.continent ?? null,
     asn: cf?.asn ?? null,
-    asOrganization: cf?.asOrganization ?? null,
+    asOrganization,
     timestamp: new Date().toISOString(),
   };
 
