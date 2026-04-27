@@ -101,11 +101,26 @@ app.use("/*", async (c, next) => {
  * Proxies a request to https://test.nextdns.io/ and returns the JSON payload.
  * This eliminates CORS issues that arise when the browser calls the endpoint
  * directly from a non-NextDNS-connected network.
+ *
+ * IP Transparency: the client's real IP (from CF-Connecting-IP) is forwarded
+ * via X-Forwarded-For and X-Real-IP so NextDNS can recognize the profile.
+ * Both IPv4 (e.g. "1.2.3.4") and IPv6 (e.g. "2001:db8::1") are forwarded
+ * as-is; no normalization is needed because NextDNS accepts both forms.
+ * If the header is absent the fetch proceeds without the extra headers so the
+ * worker never crashes.
  */
 app.get("/nextdns", async (c) => {
   try {
+    const clientIp = c.req.header("CF-Connecting-IP");
+
+    const requestHeaders: HeadersInit = { Accept: "application/json" };
+    if (clientIp) {
+      requestHeaders["X-Forwarded-For"] = clientIp;
+      requestHeaders["X-Real-IP"] = clientIp;
+    }
+
     const upstream = await fetch("https://test.nextdns.io/", {
-      headers: { Accept: "application/json" },
+      headers: requestHeaders,
       signal: AbortSignal.timeout(10_000), // 10-second timeout
     });
 
