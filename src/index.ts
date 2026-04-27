@@ -16,12 +16,21 @@ const ALLOWED_ORIGINS = [
 // TypeScript interfaces for all API response shapes
 // ---------------------------------------------------------------------------
 
-/** Response forwarded from https://test.nextdns.io/ */
+/**
+ * Response returned by the /nextdns route.
+ *
+ * `profile` and `server` are intentionally omitted: the Cloudflare Worker
+ * acts as an intermediate proxy, so NextDNS cannot reliably link the request
+ * to a specific profile or edge server.  Exposing those fields would display
+ * inaccurate data, so they are stripped before the response is sent.
+ *
+ * `auditLog` records a human-readable note about the proxy behaviour so the
+ * frontend can surface it in a diagnostic audit trail.
+ */
 export interface NextDnsResponse {
   status: string;
   protocol: string;
-  profile?: string;
-  server?: string;
+  auditLog: string;
   [key: string]: unknown;
 }
 
@@ -133,7 +142,22 @@ app.get("/nextdns", async (c) => {
       return c.json(body, 502);
     }
 
-    const data = (await upstream.json()) as NextDnsResponse;
+    const raw = (await upstream.json()) as Record<string, unknown>;
+
+    // Strip fields that the proxy cannot provide accurately.
+    // NextDNS resolves `profile` and `server` based on the originating DNS
+    // resolver, but because this Worker is the one hitting test.nextdns.io the
+    // values would reflect the Worker's edge node, not the end-user's profile.
+    const { profile: _profile, server: _server, ...rest } = raw;
+
+    const data: NextDnsResponse = {
+      ...rest,
+      status: typeof raw.status === "string" ? raw.status : "",
+      protocol: typeof raw.protocol === "string" ? raw.protocol : "",
+      auditLog:
+        "NextDNS: Diagnostic proxied via Edge (Manual verify recommended)",
+    };
+
     return c.json(data);
   } catch (err) {
     const isTimeout =
