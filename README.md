@@ -1,5 +1,7 @@
 # NetCheck-BFF
 
+[![Deploy to Cloudflare Workers](https://github.com/aym3nb/NetCheck-BFF/actions/workflows/deploy.yml/badge.svg)](https://github.com/aym3nb/NetCheck-BFF/actions/workflows/deploy.yml)
+
 > **High-performance diagnostic proxy for the [NetCheck](https://github.com/aym3nb/NetCheck) dashboard.**
 
 A lightweight Backend-for-Frontend (BFF) built on **Cloudflare Workers** and **Hono** that resolves browser CORS limitations and provides high-fidelity network diagnostics — including NextDNS connectivity checks and rich geolocation/ASN metadata — from the edge.
@@ -199,3 +201,37 @@ After deployment, update `VITE_BFF_URL` in the NetCheck frontend's production en
 ```bash
 npm run typecheck
 ```
+
+---
+
+## CI/CD Deployment
+
+Every push to the `main` branch automatically deploys the Worker to Cloudflare via the GitHub Actions workflow defined in `.github/workflows/deploy.yml`.
+
+### Required GitHub Secrets
+
+Configure the following secrets in your repository under **Settings → Secrets and variables → Actions**:
+
+| Secret | Description |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare API token scoped to deploy Workers |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare Account ID |
+
+#### `CLOUDFLARE_API_TOKEN`
+
+1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com/profile/api-tokens).
+2. Click **Create Token**.
+3. Select the **Edit Cloudflare Workers** template.
+4. Scope the token to the appropriate account and zone, then click **Continue to summary** → **Create Token**.
+5. Copy the generated token and add it as the `CLOUDFLARE_API_TOKEN` secret in your GitHub repository.
+
+#### `CLOUDFLARE_ACCOUNT_ID`
+
+Your Account ID is displayed in the right-hand sidebar of the **Workers & Pages** section of the Cloudflare dashboard. Copy it and add it as the `CLOUDFLARE_ACCOUNT_ID` secret in your GitHub repository.
+
+### Branch Protection
+
+It is strongly recommended to enable branch protection on `main` to ensure that every change is deployed through the CI/CD pipeline and that the workflow passes before merging. Configure this under **Settings → Branches → Add branch protection rule** and enable at minimum:
+
+* **Require status checks to pass before merging** (select the `deploy` job).
+* **Require branches to be up to date before merging**.
